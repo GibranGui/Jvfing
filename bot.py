@@ -26,38 +26,38 @@ class MyBot(commands.Bot):
         print("✅ Lisensi dimuat!")
         
         print("🚀 Menjalankan webserver...")
-        self.loop.create_task(start_webserver())
-        
+        asyncio.create_task(start_webserver(self))
+
     async def load_licenses(self):
-    """Muat lisensi dari channel database."""
-    try:
-        database_channel = await self.fetch_channel(DATABASE_CHANNEL_ID)
-    except discord.NotFound:
-        print("⚠️ Database channel tidak ditemukan!")
-        return
-    except discord.Forbidden:
-        print("❌ Bot tidak memiliki izin untuk mengakses channel database!")
-        return
-
-    async for message in database_channel.history(oldest_first=True):
-        content = message.content.strip()
-        
-        # Periksa dan hapus blok kode JSON jika ada
-        if content.startswith("```json") and content.endswith("```"):
-            content = content[7:-3].strip()
-
+        """Muat lisensi dari channel database."""
         try:
-            data = json.loads(content)
-            if "user_id" in data and "key" in data and "expiry" in data:
-                self.licenses[data["user_id"]] = {
-                    "key": data["key"],
-                    "expiry": data["expiry"]
-                }
-            else:
-                print(f"⚠️ Format JSON tidak lengkap: {message.content}")
-        except json.JSONDecodeError:
-            print(f"⚠️ Format JSON salah: {message.content}")
-            
+            database_channel = await self.fetch_channel(DATABASE_CHANNEL_ID)
+        except discord.NotFound:
+            print("⚠️ Database channel tidak ditemukan!")
+            return
+        except discord.Forbidden:
+            print("❌ Bot tidak memiliki izin untuk mengakses channel database!")
+            return
+
+        async for message in database_channel.history(oldest_first=True):
+            content = message.content.strip()
+
+            # Periksa dan hapus blok kode JSON jika ada
+            if content.startswith("```json") and content.endswith("```"):
+                content = content[7:-3].strip()
+
+            try:
+                data = json.loads(content)
+                if "user_id" in data and "key" in data and "expiry" in data:
+                    self.licenses[data["user_id"]] = {
+                        "key": data["key"],
+                        "expiry": data["expiry"]
+                    }
+                else:
+                    print(f"⚠️ Format JSON tidak lengkap: {message.content}")
+            except json.JSONDecodeError:
+                print(f"⚠️ Format JSON salah: {message.content}")
+
     async def save_licenses(self):
         """Simpan lisensi ke channel database."""
         try:
@@ -108,6 +108,7 @@ async def generate_license(ctx, member: discord.Member):
 
 async def handle_request(request):
     """API untuk mendapatkan script berdasarkan lisensi."""
+    bot = request.app["bot"]
     data = await request.json()
     user_id = str(data.get("user_id"))
     license_key = data.get("license_key")
@@ -135,14 +136,16 @@ async def handle_request(request):
 
     return web.json_response({"valid": False, "error": "File script tidak ditemukan!"})
 
-app = web.Application()
-app.router.add_post("/get_script", handle_request)
-
-async def start_webserver():
+async def start_webserver(bot):
     """Menjalankan webserver untuk API."""
+    app = web.Application()
+    app["bot"] = bot
+    app.router.add_post("/get_script", handle_request)
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 5000)
     await site.start()
+    print("🌐 Webserver berjalan di port 5000...")
 
 bot.run(TOKEN)
