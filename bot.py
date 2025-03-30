@@ -21,21 +21,24 @@ class MyBot(commands.Bot):
         self.licenses = {}
 
     async def setup_hook(self):
-        """Menjalankan task async sebelum bot siap."""
         print("🔄 Memuat lisensi...")
         await self.load_licenses()
         print("✅ Lisensi dimuat!")
-
+        
         print("🚀 Menjalankan webserver...")
         self.loop.create_task(start_webserver())
 
     async def load_licenses(self):
         """Muat lisensi dari channel database."""
-        database_channel = self.get_channel(DATABASE_CHANNEL_ID)
-        if not database_channel:
+        try:
+            database_channel = await self.fetch_channel(DATABASE_CHANNEL_ID)
+        except discord.NotFound:
             print("⚠️ Database channel tidak ditemukan!")
             return
-        
+        except discord.Forbidden:
+            print("❌ Bot tidak memiliki izin untuk mengakses channel database!")
+            return
+
         async for message in database_channel.history(oldest_first=True):
             try:
                 content = message.content.strip("```json\n").strip("\n```")
@@ -49,11 +52,15 @@ class MyBot(commands.Bot):
 
     async def save_licenses(self):
         """Simpan lisensi ke channel database."""
-        database_channel = self.get_channel(DATABASE_CHANNEL_ID)
-        if not database_channel:
+        try:
+            database_channel = await self.fetch_channel(DATABASE_CHANNEL_ID)
+        except discord.NotFound:
             print("⚠️ Database channel tidak ditemukan!")
             return
-
+        except discord.Forbidden:
+            print("❌ Bot tidak memiliki izin untuk mengakses channel database!")
+            return
+        
         await database_channel.purge()
         for user_id, data in self.licenses.items():
             license_data = json.dumps({
@@ -83,10 +90,6 @@ async def generate_license(ctx, member: discord.Member):
     embed.add_field(name="📅 Berlaku hingga", value=expiry_date, inline=False)
     embed.set_footer(text=f"Dibuat untuk {member.name}")
 
-    license_channel = bot.get_channel(DATABASE_CHANNEL_ID)
-    if license_channel:
-        await license_channel.send(embed=embed)
-
     try:
         await member.send(embed=embed)
     except:
@@ -110,8 +113,9 @@ async def handle_request(request):
     if license_key != stored_key or expiry_date < datetime.now(UTC_PLUS_7):
         return web.json_response({"valid": False, "error": "Lisensi sudah kadaluarsa!"})
 
-    script_channel = bot.get_channel(SCRIPT_CHANNEL_ID)
-    if not script_channel:
+    try:
+        script_channel = await bot.fetch_channel(SCRIPT_CHANNEL_ID)
+    except discord.NotFound:
         return web.json_response({"valid": False, "error": "Channel script tidak ditemukan!"})
 
     async for message in script_channel.history(limit=10):
