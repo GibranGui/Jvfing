@@ -11,7 +11,6 @@ import asyncio
 TOKEN = os.getenv("TOKEN")
 ADMIN_ROLE_NAME = "Admin"
 SCRIPT_CHANNEL_ID = 1355918124238770288
-LICENSE_CHANNEL_ID = 1355918237178528009
 DATABASE_CHANNEL_ID = 1355918237178528009  # Ganti dengan ID channel database
 
 UTC_PLUS_7 = timezone(timedelta(hours=7))
@@ -84,7 +83,7 @@ async def generate_license(ctx, member: discord.Member):
     embed.add_field(name="📅 Berlaku hingga", value=expiry_date, inline=False)
     embed.set_footer(text=f"Dibuat untuk {member.name}")
 
-    license_channel = bot.get_channel(LICENSE_CHANNEL_ID)
+    license_channel = bot.get_channel(DATABASE_CHANNEL_ID)
     if license_channel:
         await license_channel.send(embed=embed)
 
