@@ -47,7 +47,7 @@ async def on_ready():
 async def generate_license(ctx, member: discord.Member):
     if ADMIN_ROLE_NAME in [role.name for role in ctx.author.roles]:
         license_key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
-        expiry_date = (datetime.datetime.now(UTC) + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+        expiry_date = (datetime.datetime.utcnow() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
         licenses[str(member.id)] = {"key": license_key, "expiry": expiry_date}
         await save_licenses()
@@ -79,7 +79,7 @@ async def handle_request(request):
         stored_key = licenses[user_id]["key"]
         expiry_date = datetime.datetime.strptime(licenses[user_id]["expiry"], "%Y-%m-%d")
 
-        if license_key == stored_key and expiry_date > datetime.datetime.now(UTC):
+        if license_key == stored_key and expiry_date > datetime.datetime.utcnow():
             script_channel = bot.get_channel(SCRIPT_CHANNEL_ID)
             async for message in script_channel.history(limit=10):
                 if message.attachments:
