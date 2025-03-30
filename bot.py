@@ -98,4 +98,4 @@ async def main():
         bot.loop.create_task(start_webserver())
         await bot.start(TOKEN)
 
-asyncio.run(main()
+asyncio.run(main())
