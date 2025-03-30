@@ -62,7 +62,7 @@ async def handle_request(request):
         stored_key = licenses[user_id]["key"]
         expiry_date = datetime.datetime.strptime(licenses[user_id]["expiry"], "%Y-%m-%d")
 
-        if license_key == stored_key and expiry_date > datetime.datetime.utcnow():
+        if license_key == stored_key and expiry_date > datetime.datetime.now(UTC+7):
             # 🔹 Ambil file .lua terbaru dari channel script
             script_channel = bot.get_channel(SCRIPT_CHANNEL_ID)
             async for message in script_channel.history(limit=10):  # Ambil hingga 10 pesan terakhir
@@ -72,7 +72,7 @@ async def handle_request(request):
                             script_content = await attachment.read()
                             script_content = script_content.decode("utf-8")  # Konversi ke teks
 
-                            await license_channel.send(f"✅ **Lisensi Digunakan** oleh <@{user_id}>\n📅 **Tanggal**: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                            await license_channel.send(f"✅ **Lisensi Digunakan** oleh <@{user_id}>\n📅 **Tanggal**: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC+7')}")
 
                             return web.json_response({"valid": True, "script": script_content})
 
