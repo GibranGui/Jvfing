@@ -1,5 +1,4 @@
 
-
 import discord
 from discord.ext import commands
 from aiohttp import web
@@ -15,8 +14,6 @@ SCRIPT_CHANNEL_ID = 1355918124238770288  # ID channel tempat menyimpan script
 LICENSE_CHANNEL_ID = 1355918237178528009  # ID channel untuk log lisensi
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
-
-Simpan lisensi dalam file JSON
 
 licenses = {}
 
