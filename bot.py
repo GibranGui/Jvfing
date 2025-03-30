@@ -22,7 +22,7 @@ bot = MyBot(command_prefix="!", intents=discord.Intents.all())
 
 licenses = {}
 
-asyasync def restore_licenses():
+async def restore_licenses():
     await bot.wait_until_ready()  # Tunggu hingga bot siap sepenuhnya
     database_channel = bot.get_channel(DATABASE_CHANNEL_ID)
     
