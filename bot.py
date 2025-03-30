@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 from aiohttp import web
-import json
 import random
 import string
 import datetime
@@ -12,26 +11,36 @@ TOKEN = os.getenv("TOKEN")
 ADMIN_ROLE_NAME = "Admin"
 SCRIPT_CHANNEL_ID = 1355918124238770288
 LICENSE_CHANNEL_ID = 1355918237178528009
+DATABASE_CHANNEL_ID = 1355918237178528009  # Ganti dengan ID channel database
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 licenses = {}
 
 async def load_licenses():
+    """Muat lisensi dari channel database."""
     global licenses
-    try:
-        with open("licenses.json", "r") as f:
-            licenses = json.load(f)
-    except FileNotFoundError:
-        licenses = {}
+    licenses = {}
+    database_channel = bot.get_channel(DATABASE_CHANNEL_ID)
+    if database_channel:
+        async for message in database_channel.history(oldest_first=True):
+            try:
+                user_id, license_key, expiry_date = message.content.split("|")
+                licenses[user_id] = {"key": license_key, "expiry": expiry_date}
+            except ValueError:
+                print(f"⚠️ Format salah di database: {message.content}")
 
 async def save_licenses():
-    with open("licenses.json", "w") as f:
-        json.dump(licenses, f, indent=4)
+    """Simpan lisensi ke channel database."""
+    database_channel = bot.get_channel(DATABASE_CHANNEL_ID)
+    if database_channel:
+        await database_channel.purge()
+        for user_id, data in licenses.items():
+            await database_channel.send(f"{user_id}|{data['key']}|{data['expiry']}")
 
 @bot.event
 async def on_ready():
     await load_licenses()
-    print(f"{bot.user} siap!")
+    print(f"{bot.user} siap! Lisensi dimuat dari database Discord.")
 
 @bot.command()
 async def generate_license(ctx, member: discord.Member):
