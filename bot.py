@@ -27,8 +27,7 @@ class MyBot(commands.Bot):
         
         print("🚀 Menjalankan webserver...")
         self.loop.create_task(start_webserver())
-
-    async def load_licenses(self):
+        
     async def load_licenses(self):
     """Muat lisensi dari channel database."""
     try:
@@ -58,6 +57,7 @@ class MyBot(commands.Bot):
                 print(f"⚠️ Format JSON tidak lengkap: {message.content}")
         except json.JSONDecodeError:
             print(f"⚠️ Format JSON salah: {message.content}")
+            
     async def save_licenses(self):
         """Simpan lisensi ke channel database."""
         try:
