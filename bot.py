@@ -22,23 +22,26 @@ bot = MyBot(command_prefix="!", intents=discord.Intents.all())
 
 licenses = {}
 
-async def restore_licenses():
-    """Mengambil data lisensi dari channel database dan menyimpannya ke dictionary."""
-    global licenses
-    licenses = {}
-
+asyasync def restore_licenses():
+    await bot.wait_until_ready()  # Tunggu hingga bot siap sepenuhnya
     database_channel = bot.get_channel(DATABASE_CHANNEL_ID)
+    
+    if database_channel is None:
+        print(f"❌ Gagal menemukan channel database dengan ID {DATABASE_CHANNEL_ID}")
+        return
+
     async for message in database_channel.history(limit=100):  # Ambil 100 pesan terakhir
         try:
             user_id, license_key, expiry_date = message.content.split("|")
             licenses[user_id] = {"key": license_key, "expiry": expiry_date}
         except ValueError:
-            continue  # Lewati jika format tidak sesuai
+            print(f"⚠️ Format pesan salah: {message.content}")
 
 @bot.event
 async def on_ready():
-    print(f"{bot.user} siap!")
-
+    print(f"✅ {bot.user} siap!")
+    await restore_licenses()
+    
 @bot.command()
 async def generate_license(ctx, member: discord.Member):
     if ADMIN_ROLE_NAME in [role.name for role in ctx.author.roles]:
