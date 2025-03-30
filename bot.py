@@ -29,27 +29,35 @@ class MyBot(commands.Bot):
         self.loop.create_task(start_webserver())
 
     async def load_licenses(self):
-        """Muat lisensi dari channel database."""
-        try:
-            database_channel = await self.fetch_channel(DATABASE_CHANNEL_ID)
-        except discord.NotFound:
-            print("⚠️ Database channel tidak ditemukan!")
-            return
-        except discord.Forbidden:
-            print("❌ Bot tidak memiliki izin untuk mengakses channel database!")
-            return
+    async def load_licenses(self):
+    """Muat lisensi dari channel database."""
+    try:
+        database_channel = await self.fetch_channel(DATABASE_CHANNEL_ID)
+    except discord.NotFound:
+        print("⚠️ Database channel tidak ditemukan!")
+        return
+    except discord.Forbidden:
+        print("❌ Bot tidak memiliki izin untuk mengakses channel database!")
+        return
 
-        async for message in database_channel.history(oldest_first=True):
-            try:
-                content = message.content.strip("```json\n").strip("\n```")
-                data = json.loads(content)
+    async for message in database_channel.history(oldest_first=True):
+        content = message.content.strip()
+        
+        # Periksa dan hapus blok kode JSON jika ada
+        if content.startswith("```json") and content.endswith("```"):
+            content = content[7:-3].strip()
+
+        try:
+            data = json.loads(content)
+            if "user_id" in data and "key" in data and "expiry" in data:
                 self.licenses[data["user_id"]] = {
                     "key": data["key"],
                     "expiry": data["expiry"]
                 }
-            except (json.JSONDecodeError, KeyError):
-                print(f"⚠️ Format salah di database: {message.content}")
-
+            else:
+                print(f"⚠️ Format JSON tidak lengkap: {message.content}")
+        except json.JSONDecodeError:
+            print(f"⚠️ Format JSON salah: {message.content}")
     async def save_licenses(self):
         """Simpan lisensi ke channel database."""
         try:
