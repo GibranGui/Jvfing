@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from aiohttp import web
+import json
 import random
 import string
 import datetime
@@ -17,25 +18,25 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 licenses = {}
 
 async def load_licenses():
-    """Muat lisensi dari channel database."""
     global licenses
     licenses = {}
     database_channel = bot.get_channel(DATABASE_CHANNEL_ID)
     if database_channel:
         async for message in database_channel.history(oldest_first=True):
             try:
-                user_id, license_key, expiry_date = message.content.split("|")
-                licenses[user_id] = {"key": license_key, "expiry": expiry_date}
-            except ValueError:
+                content = message.content.strip("```json\n").strip("\n```")
+                data = json.loads(content)
+                licenses[data["user_id"]] = {"key": data["key"], "expiry": data["expiry"]}
+            except (json.JSONDecodeError, KeyError):
                 print(f"⚠️ Format salah di database: {message.content}")
 
 async def save_licenses():
-    """Simpan lisensi ke channel database."""
     database_channel = bot.get_channel(DATABASE_CHANNEL_ID)
     if database_channel:
         await database_channel.purge()
         for user_id, data in licenses.items():
-            await database_channel.send(f"{user_id}|{data['key']}|{data['expiry']}")
+            license_data = json.dumps({"user_id": user_id, "key": data["key"], "expiry": data["expiry"]})
+            await database_channel.send(f"```json\n{license_data}\n```")
 
 @bot.event
 async def on_ready():
@@ -47,15 +48,20 @@ async def generate_license(ctx, member: discord.Member):
     if ADMIN_ROLE_NAME in [role.name for role in ctx.author.roles]:
         license_key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
         expiry_date = (datetime.datetime.utcnow() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
-        
+
         licenses[str(member.id)] = {"key": license_key, "expiry": expiry_date}
         await save_licenses()
-        
+
+        embed = discord.Embed(title="🎟 Lisensi Dibuat", color=discord.Color.green())
+        embed.add_field(name="🔑 Kode", value=f"`{license_key}`", inline=False)
+        embed.add_field(name="📅 Berlaku hingga", value=expiry_date, inline=False)
+        embed.set_footer(text=f"Dibuat untuk {member.name}")
+
         license_channel = bot.get_channel(LICENSE_CHANNEL_ID)
-        await license_channel.send(f"🎟 **Lisensi Dibuat** untuk {member.mention}\n🔑 **Kode**: `{license_key}`\n📅 **Berlaku hingga**: {expiry_date}")
-        
+        await license_channel.send(embed=embed)
+
         try:
-            await member.send(f"🔑 **Lisensi Anda**: `{license_key}`\n📅 **Berlaku hingga**: {expiry_date}")
+            await member.send(embed=embed)
         except:
             await ctx.send(f"⚠️ Tidak bisa mengirim DM ke {member.mention}, pastikan DM terbuka!")
         
@@ -68,12 +74,11 @@ async def handle_request(request):
     data = await request.json()
     user_id = str(data.get("user_id"))
     license_key = data.get("license_key")
-    license_channel = bot.get_channel(LICENSE_CHANNEL_ID)
     
     if user_id in licenses:
         stored_key = licenses[user_id]["key"]
         expiry_date = datetime.datetime.strptime(licenses[user_id]["expiry"], "%Y-%m-%d")
-        
+
         if license_key == stored_key and expiry_date > datetime.datetime.utcnow():
             script_channel = bot.get_channel(SCRIPT_CHANNEL_ID)
             async for message in script_channel.history(limit=10):
@@ -82,15 +87,11 @@ async def handle_request(request):
                         if attachment.filename.endswith(".lua"):
                             script_content = await attachment.read()
                             script_content = script_content.decode("utf-8")
-                            
-                            await license_channel.send(f"✅ **Lisensi Digunakan** oleh <@{user_id}>\n📅 **Tanggal**: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
                             return web.json_response({"valid": True, "script": script_content})
             return web.json_response({"valid": False, "error": "File script tidak ditemukan!"})
         else:
-            await license_channel.send(f"❌ **Lisensi Tidak Valid** untuk <@{user_id}>")
             return web.json_response({"valid": False, "error": "Lisensi sudah kadaluarsa!"})
     else:
-        await license_channel.send(f"❌ **Lisensi Tidak Terdaftar** untuk <@{user_id}>")
         return web.json_response({"valid": False, "error": "Lisensi tidak valid!"})
 
 app = web.Application()
