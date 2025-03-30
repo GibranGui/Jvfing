@@ -1,4 +1,4 @@
-Script python nya ini
+
 
 import discord
 from discord.ext import commands
