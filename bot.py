@@ -117,30 +117,27 @@ async def handle_request(request):
 
     # Cek lisensi
     if user_id not in bot.licenses:
-        return web.json_response({"valid": False, "error": "Lisensi tidak valid!"})
+        return web.Response(text="INVALID")
 
     stored_key = bot.licenses[user_id]["key"]
     expiry_date = datetime.strptime(bot.licenses[user_id]["expiry"], "%Y-%m-%d").replace(tzinfo=UTC_PLUS_7)
 
     if license_key != stored_key or expiry_date < datetime.now(UTC_PLUS_7):
-        return web.json_response({"valid": False, "error": "Lisensi sudah kadaluarsa!"})
+        return web.Response(text="INVALID")
 
     try:
         script_channel = await bot.fetch_channel(SCRIPT_CHANNEL_ID)
     except discord.NotFound:
-        return web.json_response({"valid": False, "error": "Channel script tidak ditemukan!"})
+        return web.Response(text="INVALID")
 
     async for message in script_channel.history(limit=10):
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.endswith(".lua"):
-                    return web.json_response({
-                        "valid": True,
-                        "attachment_url": attachment.url  # Kirim URL file
-                    })
+                    return web.Response(text=attachment.url)  # Kirim langsung URL file
 
-    return web.json_response({"valid": False, "error": "File script tidak ditemukan!"})
-
+    return web.Response(text="INVALID")  # Jika tidak ada file script
+    
 async def start_webserver(bot):
     """Menjalankan webserver untuk API."""
     app = web.Application()
