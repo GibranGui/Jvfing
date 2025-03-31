@@ -7,6 +7,7 @@ import string
 from datetime import datetime, timedelta, timezone
 import os
 import asyncio
+import aiofiles
 
 # Konfigurasi
 TOKEN = os.getenv("TOKEN")
@@ -114,6 +115,7 @@ async def handle_request(request):
     user_id = str(data.get("user_id"))
     license_key = data.get("license_key")
 
+    # Cek lisensi
     if user_id not in bot.licenses:
         return web.json_response({"valid": False, "error": "Lisensi tidak valid!"})
 
@@ -132,8 +134,10 @@ async def handle_request(request):
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.endswith(".lua"):
-                    script_content = await attachment.read()
-                    return web.json_response({"valid": True, "script": script_content.decode("utf-8")})
+                    return web.json_response({
+                        "valid": True,
+                        "attachment_url": attachment.url  # Kirim URL file
+                    })
 
     return web.json_response({"valid": False, "error": "File script tidak ditemukan!"})
 
