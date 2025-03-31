@@ -7,6 +7,8 @@ import string
 from datetime import datetime, timedelta, timezone
 import os
 import asyncio
+import aiofiles
+
 
 TOKEN = os.getenv("TOKEN")
 ADMIN_ROLE_NAME = "Admin"
@@ -113,28 +115,31 @@ async def handle_request(request):
     user_id = str(data.get("user_id"))
     license_key = data.get("license_key")
 
+    # Cek lisensi
     if user_id not in bot.licenses:
-        return web.Response(text="error: Lisensi tidak valid!", content_type="text/plain")
+        return web.json_response({"valid": False, "error": "Lisensi tidak valid!"})
 
     stored_key = bot.licenses[user_id]["key"]
     expiry_date = datetime.strptime(bot.licenses[user_id]["expiry"], "%Y-%m-%d").replace(tzinfo=UTC_PLUS_7)
 
     if license_key != stored_key or expiry_date < datetime.now(UTC_PLUS_7):
-        return web.Response(text="error: Lisensi sudah kadaluarsa!", content_type="text/plain")
+        return web.json_response({"valid": False, "error": "Lisensi sudah kadaluarsa!"})
 
     try:
         script_channel = await bot.fetch_channel(SCRIPT_CHANNEL_ID)
     except discord.NotFound:
-        return web.Response(text="error: Channel script tidak ditemukan!", content_type="text/plain")
+        return web.json_response({"valid": False, "error": "Channel script tidak ditemukan!"})
 
     async for message in script_channel.history(limit=10):
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.endswith(".lua"):
-                    script_content = await attachment.read()
-                    return web.Response(text=script_content.decode("utf-8"), content_type="text/plain")
+                    return web.json_response({
+                        "valid": True,
+                        "attachment_url": attachment.url  # Kirim URL file
+                    })
 
-    return web.Response(text="error: File script tidak ditemukan!", content_type="text/plain")
+    return web.json_response({"valid": False, "error": "File script tidak ditemukan!"})
 
 async def start_webserver(bot):
     """Menjalankan webserver untuk API."""
