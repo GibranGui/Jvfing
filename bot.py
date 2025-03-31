@@ -7,9 +7,8 @@ import string
 from datetime import datetime, timedelta, timezone
 import os
 import asyncio
-import aiofiles
 
-
+# Konfigurasi
 TOKEN = os.getenv("TOKEN")
 ADMIN_ROLE_NAME = "Admin"
 SCRIPT_CHANNEL_ID = 1355918124238770288
@@ -89,23 +88,23 @@ async def generate_license(ctx, member: discord.Member):
         await ctx.send("❌ Anda tidak memiliki izin!", delete_after=5)
         return
 
-    license_key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
-    expiry_date = (datetime.now(UTC_PLUS_7) + timedelta(days=30)).strftime("%Y-%m-%d")
+    license_key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))  
+    expiry_date = (datetime.now(UTC_PLUS_7) + timedelta(days=30)).strftime("%Y-%m-%d")  
 
-    bot.licenses[str(member.id)] = {"key": license_key, "expiry": expiry_date}
-    await bot.save_licenses()
+    bot.licenses[str(member.id)] = {"key": license_key, "expiry": expiry_date}  
+    await bot.save_licenses()  
 
-    embed = discord.Embed(title="🎟 Lisensi Dibuat", color=discord.Color.green())
-    embed.add_field(name="🔑 Kode", value=f"`{license_key}`", inline=False)
-    embed.add_field(name="📅 Berlaku hingga", value=expiry_date, inline=False)
-    embed.set_footer(text=f"Dibuat untuk {member.name}")
+    embed = discord.Embed(title="🎟 Lisensi Dibuat", color=discord.Color.green())  
+    embed.add_field(name="🔑 Kode", value=f"`{license_key}`", inline=False)  
+    embed.add_field(name="📅 Berlaku hingga", value=expiry_date, inline=False)  
+    embed.set_footer(text=f"Dibuat untuk {member.name}")  
 
     try:
         await member.send(embed=embed)
     except:
-        await ctx.send(f"⚠️ Tidak bisa mengirim DM ke {member.mention}, pastikan DM terbuka!")
+        await ctx.send(f"⚠️ Tidak bisa mengirim DM ke {member.mention}, pastikan DM terbuka!")  
 
-    await ctx.message.delete(delay=3)
+    await ctx.message.delete(delay=3)  
     await ctx.send(f"✅ Lisensi untuk {member.mention} berhasil dibuat!", delete_after=5)
 
 async def handle_request(request):
@@ -115,7 +114,6 @@ async def handle_request(request):
     user_id = str(data.get("user_id"))
     license_key = data.get("license_key")
 
-    # Cek lisensi
     if user_id not in bot.licenses:
         return web.json_response({"valid": False, "error": "Lisensi tidak valid!"})
 
@@ -134,10 +132,8 @@ async def handle_request(request):
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.endswith(".lua"):
-                    return web.json_response({
-                        "valid": True,
-                        "attachment_url": attachment.url  # Kirim URL file
-                    })
+                    script_content = await attachment.read()
+                    return web.json_response({"valid": True, "script": script_content.decode("utf-8")})
 
     return web.json_response({"valid": False, "error": "File script tidak ditemukan!"})
 
@@ -147,10 +143,10 @@ async def start_webserver(bot):
     app["bot"] = bot
     app.router.add_post("/get_script", handle_request)
 
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 5000)
-    await site.start()
+    runner = web.AppRunner(app)  
+    await runner.setup()  
+    site = web.TCPSite(runner, "0.0.0.0", 5000)  
+    await site.start()  
     print("🌐 Webserver berjalan di port 5000...")
 
 bot.run(TOKEN)
