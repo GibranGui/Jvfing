@@ -11,9 +11,12 @@ import aiofiles
 
 # Konfigurasi
 TOKEN = os.getenv("TOKEN")
-ADMIN_ROLE_NAME = "Admin"
+ADMIN_ROLE_NAME = "Owner"
+SALES_ROLE_NAME = "Salles Man"
 SCRIPT_CHANNEL_ID = 1355918124238770288
 DATABASE_CHANNEL_ID = 1355918237178528009  # Ganti dengan ID channel database
+SALES_LIMIT_CHANNEL_ID = 1357006827937595624  # Ganti dengan ID channel batasan admin sales
+GENERATE_LICENSE_CHANNEL_ID = 1357006983701598319  # Ganti dengan ID channel khusus generate lisensi
 
 UTC_PLUS_7 = timezone(timedelta(hours=7))
 
@@ -50,10 +53,11 @@ class MyBot(commands.Bot):
 
             try:
                 data = json.loads(content)
-                if "user_id" in data and "key" in data and "expiry" in data:
+                if "user_id" in data and "key" in data:
                     self.licenses[data["user_id"]] = {
                         "key": data["key"],
-                        "expiry": data["expiry"]
+                        "expiry": data.get("expiry"),
+                        "used_on": data.get("used_on")  # Menambahkan informasi waktu penggunaan
                     }
                 else:
                     print(f"⚠️ Format JSON tidak lengkap: {message.content}")
@@ -76,7 +80,8 @@ class MyBot(commands.Bot):
             license_data = json.dumps({
                 "user_id": user_id,
                 "key": data["key"],
-                "expiry": data["expiry"]
+                "expiry": data["expiry"],
+                "used_on": data["used_on"]
             })
             await database_channel.send(f"```json\n{license_data}\n```")
 
@@ -85,14 +90,28 @@ bot = MyBot()
 @bot.command()
 async def generate_license(ctx, member: discord.Member):
     """Generate lisensi untuk member."""
-    if ADMIN_ROLE_NAME not in [role.name for role in ctx.author.roles]:
+    if ADMIN_ROLE_NAME not in [role.name for role in ctx.author.roles] and SALES_ROLE_NAME not in [role.name for role in ctx.author.roles]:
         await ctx.send("❌ Anda tidak memiliki izin!", delete_after=5)
         return
 
+    # Cek batasan untuk Admin Sales
+    if SALES_ROLE_NAME in [role.name for role in ctx.author.roles]:
+        limit = await get_sales_limit(ctx.author.id)
+        if limit <= 0:
+            await ctx.send("❌ Anda sudah mencapai batas lisensi yang dapat dibuat!", delete_after=5)
+            return
+        else:
+            await decrement_sales_limit(ctx.author.id)  # Kurangi batasan lisensi
+
     license_key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))  
+    used_on = datetime.now(UTC_PLUS_7).strftime("%Y-%m-%d %H:%M:%S")  
     expiry_date = (datetime.now(UTC_PLUS_7) + timedelta(days=30)).strftime("%Y-%m-%d")  
 
-    bot.licenses[str(member.id)] = {"key": license_key, "expiry": expiry_date}  
+    bot.licenses[str(member.id)] = {
+        "key": license_key, 
+        "expiry": expiry_date,  
+        "used_on": used_on  # Menyimpan waktu penggunaan
+    }  
     await bot.save_licenses()  
 
     embed = discord.Embed(title="🎟 Lisensi Dibuat", color=discord.Color.green())  
@@ -108,6 +127,53 @@ async def generate_license(ctx, member: discord.Member):
     await ctx.message.delete(delay=3)  
     await ctx.send(f"✅ Lisensi untuk {member.mention} berhasil dibuat!", delete_after=5)
 
+async def get_sales_limit(user_id):
+    """Mendapatkan limit lisensi dari channel batasan admin sales."""
+    try:
+        sales_limit_channel = await bot.fetch_channel(SALES_LIMIT_CHANNEL_ID)
+        async for message in sales_limit_channel.history(oldest_first=True):
+            content = message.content.strip()
+
+            if content.startswith("```json") and content.endswith("```"):
+                content = content[7:-3].strip()
+
+            try:
+                data = json.loads(content)
+                if str(user_id) in data:
+                    return data[str(user_id)]["limit"]
+            except json.JSONDecodeError:
+                continue
+    except discord.NotFound:
+        print("⚠️ Sales Limit channel tidak ditemukan!")
+    except discord.Forbidden:
+        print("❌ Bot tidak memiliki izin untuk mengakses channel Sales Limit!")
+
+    return 0  # Default jika tidak ada data
+
+async def decrement_sales_limit(user_id):
+    """Mengurangi batas lisensi Admin Sales di channel Sales Limit."""
+    try:
+        sales_limit_channel = await bot.fetch_channel(SALES_LIMIT_CHANNEL_ID)
+        async for message in sales_limit_channel.history(oldest_first=True):
+            content = message.content.strip()
+
+            if content.startswith("```json") and content.endswith("```"):
+                content = content[7:-3].strip()
+
+            try:
+                data = json.loads(content)
+                if str(user_id) in data:
+                    data[str(user_id)]["limit"] -= 1  # Mengurangi limit lisensi
+                    await sales_limit_channel.purge()
+                    await sales_limit_channel.send(f"```json\n{json.dumps(data, indent=4)}\n```")
+                    return
+            except json.JSONDecodeError:
+                continue
+    except discord.NotFound:
+        print("⚠️ Sales Limit channel tidak ditemukan!")
+    except discord.Forbidden:
+        print("❌ Bot tidak memiliki izin untuk mengakses channel Sales Limit!")
+
 async def handle_request(request):
     """API untuk mendapatkan script berdasarkan lisensi."""
     bot = request.app["bot"]
@@ -120,7 +186,8 @@ async def handle_request(request):
         return web.Response(text="INVALID")
 
     stored_key = bot.licenses[user_id]["key"]
-    expiry_date = datetime.strptime(bot.licenses[user_id]["expiry"], "%Y-%m-%d").replace(tzinfo=UTC_PLUS_7)
+    used_on = datetime.strptime(bot.licenses[user_id]["used_on"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC_PLUS_7)
+    expiry_date = used_on + timedelta(days=30)
 
     if license_key != stored_key or expiry_date < datetime.now(UTC_PLUS_7):
         return web.Response(text="INVALID")
