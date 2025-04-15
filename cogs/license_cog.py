@@ -31,7 +31,7 @@ class LicenseCog(commands.Cog):
 
             if log_channel and isinstance(log_channel, discord.TextChannel):
                 embed = discord.Embed(
-                    title="✅ Log Pembuatan Lisensi",
+                    title="✅ Log Pembelian Lisensi",
                     color=discord.Color.blue(),
                     timestamp=datetime.now(UTC_PLUS_7)
                 )
