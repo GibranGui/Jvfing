@@ -1,9 +1,6 @@
 import os
 import logging
 
-# Muat .env file jika ada (untuk pengembangan lokal)
-load_dotenv()
-log = logging.getLogger(__name__)
 
 # --- Helper untuk mendapatkan env var ---
 def get_env_var(var_name: str, required: bool = True, default=None) -> str | None:
