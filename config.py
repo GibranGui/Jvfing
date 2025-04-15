@@ -1,6 +1,5 @@
 import os
 import logging
-from dotenv import load_dotenv # Hanya jika menggunakan python-dotenv untuk lokal
 
 # Muat .env file jika ada (untuk pengembangan lokal)
 load_dotenv()
