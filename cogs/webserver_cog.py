@@ -3,6 +3,7 @@ from discord.ext import commands
 from aiohttp import web
 import json
 import logging
+import asyncio  # Tambahkan import asyncio di sini
 from datetime import datetime
 
 # Impor dari file lain
