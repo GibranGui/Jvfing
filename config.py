@@ -1,6 +1,8 @@
 import os
 import logging
+from datetime import timezone, timedelta
 
+log = logging.getLogger(__name__)
 
 # --- Helper untuk mendapatkan env var ---
 def get_env_var(var_name: str, required: bool = True, default=None) -> str | None:
@@ -40,7 +42,6 @@ SCRIPT_CHANNEL_ID = get_env_var_int("SCRIPT_CHANNEL_ID") # Channel file .lua
 PURCHASE_LOG_CHANNEL_ID = get_env_var_int("PURCHASE_LOG_CHANNEL_ID") # Channel log pembelian baru
 
 # --- Konfigurasi Lain ---
-from datetime import timezone, timedelta
 UTC_PLUS_7 = timezone(timedelta(hours=7))
 LICENSE_DURATION_DAYS = 30 # Durasi lisensi dalam hari
 
