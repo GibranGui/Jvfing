@@ -1,220 +1,101 @@
 import discord
 from discord.ext import commands
-from aiohttp import web
-import json
-import random
-import string
-from datetime import datetime, timedelta, timezone
-import os
 import asyncio
-import aiofiles
+import logging
+import os
 
-# Konfigurasi
-TOKEN = os.getenv("TOKEN")
-ADMIN_ROLE_NAME = "Owner"
-SALES_ROLE_NAME = "Salles Man"
-SCRIPT_CHANNEL_ID = 1355918124238770288
-DATABASE_CHANNEL_ID = 1355918237178528009  # Ganti dengan ID channel database
-SALES_LIMIT_CHANNEL_ID = 1357006827937595624  # Ganti dengan ID channel batasan admin sales
-GENERATE_LICENSE_CHANNEL_ID = 1357006983701598319  # Ganti dengan ID channel khusus generate lisensi
+# Impor dari file proyek
+from utils.logger import setup_logging
+import config # Impor config untuk akses variabel
+from database import get_db_pool, close_db_pool
 
-UTC_PLUS_7 = timezone(timedelta(hours=7))
+# Setup logging di awal
+setup_logging()
+log = logging.getLogger(__name__)
 
+# --- Kelas Bot Utama (Lebih Ringkas) ---
 class MyBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix="!", intents=discord.Intents.all())
-        self.licenses = {}
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        super().__init__(command_prefix=config.COMMAND_PREFIX, intents=intents)
+        self.db_pool = None # Akan diinisialisasi di setup_hook
 
     async def setup_hook(self):
-        print("🔄 Memuat lisensi...")
-        await self.load_licenses()
-        print("✅ Lisensi dimuat!")
-        
-        print("🚀 Menjalankan webserver...")
-        asyncio.create_task(start_webserver(self))
+        """Inisialisasi database pool dan load Cogs."""
+        log.info("Menjalankan setup_hook...")
 
-    async def load_licenses(self):
-        """Muat lisensi dari channel database."""
+        # 1. Inisialisasi Database Pool
+        log.info("Menginisialisasi koneksi database pool...")
+        self.db_pool = await get_db_pool(config.SUPABASE_DB_URL)
+        if not self.db_pool:
+            log.critical("Gagal membuat database pool. Bot akan dimatikan.")
+            await self.close() # Hentikan bot jika DB gagal konek
+            return
+
+        # 2. Load Cogs
+        log.info("Memuat Cogs...")
+        initial_extensions = [
+            'cogs.license_cog',
+            'cogs.webserver_cog',
+            # Tambahkan cog lain di sini jika ada
+        ]
+        for extension in initial_extensions:
+            try:
+                await self.load_extension(extension)
+                log.info(f"Cog '{extension}' berhasil dimuat.")
+            except Exception as e:
+                log.exception(f"Gagal memuat Cog '{extension}': {e}")
+                # Pertimbangkan untuk menghentikan bot jika cog penting gagal dimuat
+
+        log.info("Setup hook selesai.")
+
+
+    async def on_ready(self):
+        """Dipanggil ketika bot sepenuhnya siap."""
+        log.info(f'Bot terhubung sebagai {self.user} (ID: {self.user.id})')
+        log.info(f'Prefix: {config.COMMAND_PREFIX}')
+        log.info('Siap menerima perintah dan request API.')
+
+    async def close(self):
+        """Membersihkan resource saat bot dimatikan."""
+        log.info("Memulai proses shutdown bot...")
+        # Pertama, unload cogs (ini akan memanggil cog_unload, termasuk stop webserver)
+        log.info("Unloading Cogs...")
+        for extension in list(self.extensions): # iterasi di copy list
+             try:
+                 await self.unload_extension(extension)
+                 log.info(f"Cog '{extension}' berhasil di-unload.")
+             except Exception as e:
+                 log.error(f"Error unloading Cog '{extension}': {e}")
+
+        # Kedua, tutup pool database
+        log.info("Menutup database pool...")
+        if self.db_pool:
+            await close_db_pool(self.db_pool)
+
+        # Terakhir, panggil metode close bawaan
+        log.info("Memanggil super().close()...")
+        await super().close()
+        log.info("Bot shutdown selesai.")
+
+# --- Menjalankan Bot ---
+if __name__ == "__main__":
+    log.info("Memulai bot...")
+    if not config.TOKEN:
+        log.critical("Environment variable TOKEN tidak ditemukan!")
+    elif not config.SUPABASE_DB_URL:
+         log.critical("Environment variable SUPABASE_DB_URL tidak ditemukan!")
+    # Tambahkan pengecekan env var penting lainnya dari config.py
+    elif not all([config.ADMIN_ROLE_ID, config.SALES_ROLE_ID, config.SCRIPT_CHANNEL_ID, config.PURCHASE_LOG_CHANNEL_ID]):
+         log.critical("Satu atau lebih ID Role/Channel penting tidak diatur di environment variables!")
+    else:
+        bot = MyBot()
         try:
-            database_channel = await self.fetch_channel(DATABASE_CHANNEL_ID)
-        except discord.NotFound:
-            print("⚠️ Database channel tidak ditemukan!")
-            return
-        except discord.Forbidden:
-            print("❌ Bot tidak memiliki izin untuk mengakses channel database!")
-            return
-
-        async for message in database_channel.history(oldest_first=True):
-            content = message.content.strip()
-
-            # Periksa dan hapus blok kode JSON jika ada
-            if content.startswith("```json") and content.endswith("```"):
-                content = content[7:-3].strip()
-
-            try:
-                data = json.loads(content)
-                if "user_id" in data and "key" in data:
-                    self.licenses[data["user_id"]] = {
-                        "key": data["key"],
-                        "expiry": data.get("expiry"),
-                        "used_on": data.get("used_on")  # Menambahkan informasi waktu penggunaan
-                    }
-                else:
-                    print(f"⚠️ Format JSON tidak lengkap: {message.content}")
-            except json.JSONDecodeError:
-                print(f"⚠️ Format JSON salah: {message.content}")
-
-    async def save_licenses(self):
-        """Simpan lisensi ke channel database."""
-        try:
-            database_channel = await self.fetch_channel(DATABASE_CHANNEL_ID)
-        except discord.NotFound:
-            print("⚠️ Database channel tidak ditemukan!")
-            return
-        except discord.Forbidden:
-            print("❌ Bot tidak memiliki izin untuk mengakses channel database!")
-            return
-        
-        await database_channel.purge()
-        for user_id, data in self.licenses.items():
-            license_data = json.dumps({
-                "user_id": user_id,
-                "key": data["key"],
-                "expiry": data["expiry"],
-                "used_on": data["used_on"]
-            })
-            await database_channel.send(f"```json\n{license_data}\n```")
-
-bot = MyBot()
-
-@bot.command()
-async def generate_license(ctx, member: discord.Member):
-    """Generate lisensi untuk member."""
-    if ADMIN_ROLE_NAME not in [role.name for role in ctx.author.roles] and SALES_ROLE_NAME not in [role.name for role in ctx.author.roles]:
-        await ctx.send("❌ Anda tidak memiliki izin!", delete_after=5)
-        return
-
-    # Cek batasan untuk Admin Sales
-    if SALES_ROLE_NAME in [role.name for role in ctx.author.roles]:
-        limit = await get_sales_limit(ctx.author.id)
-        if limit <= 0:
-            await ctx.send("❌ Anda sudah mencapai batas lisensi yang dapat dibuat!", delete_after=5)
-            return
-        else:
-            await decrement_sales_limit(ctx.author.id)  # Kurangi batasan lisensi
-
-    license_key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))  
-    used_on = datetime.now(UTC_PLUS_7).strftime("%Y-%m-%d %H:%M:%S")  
-    expiry_date = (datetime.now(UTC_PLUS_7) + timedelta(days=30)).strftime("%Y-%m-%d")  
-
-    bot.licenses[str(member.id)] = {
-        "key": license_key, 
-        "expiry": expiry_date,  
-        "used_on": used_on  # Menyimpan waktu penggunaan
-    }  
-    await bot.save_licenses()  
-
-    embed = discord.Embed(title="🎟 Lisensi Dibuat", color=discord.Color.green())  
-    embed.add_field(name="🔑 Kode", value=f"`{license_key}`", inline=False)  
-    embed.add_field(name="📅 Berlaku hingga", value=expiry_date, inline=False)  
-    embed.set_footer(text=f"Dibuat untuk {member.name}")  
-
-    try:
-        await member.send(embed=embed)
-    except:
-        await ctx.send(f"⚠️ Tidak bisa mengirim DM ke {member.mention}, pastikan DM terbuka!")  
-
-    await ctx.message.delete(delay=3)  
-    await ctx.send(f"✅ Lisensi untuk {member.mention} berhasil dibuat!", delete_after=5)
-
-async def get_sales_limit(user_id):
-    """Mendapatkan limit lisensi dari channel batasan admin sales."""
-    try:
-        sales_limit_channel = await bot.fetch_channel(SALES_LIMIT_CHANNEL_ID)
-        async for message in sales_limit_channel.history(oldest_first=True):
-            content = message.content.strip()
-
-            if content.startswith("```json") and content.endswith("```"):
-                content = content[7:-3].strip()
-
-            try:
-                data = json.loads(content)
-                if str(user_id) in data:
-                    return data[str(user_id)]["limit"]
-            except json.JSONDecodeError:
-                continue
-    except discord.NotFound:
-        print("⚠️ Sales Limit channel tidak ditemukan!")
-    except discord.Forbidden:
-        print("❌ Bot tidak memiliki izin untuk mengakses channel Sales Limit!")
-
-    return 0  # Default jika tidak ada data
-
-async def decrement_sales_limit(user_id):
-    """Mengurangi batas lisensi Admin Sales di channel Sales Limit."""
-    try:
-        sales_limit_channel = await bot.fetch_channel(SALES_LIMIT_CHANNEL_ID)
-        async for message in sales_limit_channel.history(oldest_first=True):
-            content = message.content.strip()
-
-            if content.startswith("```json") and content.endswith("```"):
-                content = content[7:-3].strip()
-
-            try:
-                data = json.loads(content)
-                if str(user_id) in data:
-                    data[str(user_id)]["limit"] -= 1  # Mengurangi limit lisensi
-                    await sales_limit_channel.purge()
-                    await sales_limit_channel.send(f"```json\n{json.dumps(data, indent=4)}\n```")
-                    return
-            except json.JSONDecodeError:
-                continue
-    except discord.NotFound:
-        print("⚠️ Sales Limit channel tidak ditemukan!")
-    except discord.Forbidden:
-        print("❌ Bot tidak memiliki izin untuk mengakses channel Sales Limit!")
-
-async def handle_request(request):
-    """API untuk mendapatkan script berdasarkan lisensi."""
-    bot = request.app["bot"]
-    data = await request.json()
-    user_id = str(data.get("user_id"))
-    license_key = data.get("license_key")
-
-    # Cek lisensi
-    if user_id not in bot.licenses:
-        return web.Response(text="INVALID")
-
-    stored_key = bot.licenses[user_id]["key"]
-    used_on = datetime.strptime(bot.licenses[user_id]["used_on"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC_PLUS_7)
-    expiry_date = used_on + timedelta(days=30)
-
-    if license_key != stored_key or expiry_date < datetime.now(UTC_PLUS_7):
-        return web.Response(text="INVALID")
-
-    try:
-        script_channel = await bot.fetch_channel(SCRIPT_CHANNEL_ID)
-    except discord.NotFound:
-        return web.Response(text="INVALID")
-
-    async for message in script_channel.history(limit=10):
-        if message.attachments:
-            for attachment in message.attachments:
-                if attachment.filename.endswith(".lua"):
-                    return web.Response(text=attachment.url)  # Kirim langsung URL file
-
-    return web.Response(text="INVALID")  # Jika tidak ada file script
-    
-async def start_webserver(bot):
-    """Menjalankan webserver untuk API."""
-    app = web.Application()
-    app["bot"] = bot
-    app.router.add_post("/get_script", handle_request)
-
-    runner = web.AppRunner(app)  
-    await runner.setup()  
-    site = web.TCPSite(runner, "0.0.0.0", 5000)  
-    await site.start()  
-    print("🌐 Webserver berjalan di port 5000...")
-
-bot.run(TOKEN)
+            # Jalankan bot
+            bot.run(config.TOKEN, log_handler=None) # Gunakan logger yang sudah disetup
+        except discord.LoginFailure:
+            log.critical("Gagal login ke Discord. Token salah atau tidak valid.")
+        except Exception as e:
+            log.exception(f"FATAL: Error tidak tertangani saat menjalankan bot: {e}")
