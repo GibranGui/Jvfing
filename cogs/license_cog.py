@@ -35,10 +35,9 @@ class LicenseCog(commands.Cog):
                     color=discord.Color.blue(),
                     timestamp=datetime.now(UTC_PLUS_7)
                 )
-                embed.add_field(name="Generator", value=f"{generator.mention} ({generator.id})", inline=False)
-                embed.add_field(name="Penerima", value=f"{recipient.mention} ({recipient.id})", inline=False)
-                embed.add_field(name="Kunci Lisensi", value=f"`{key}`", inline=False)
-                embed.add_field(name="Berlaku Hingga", value=expiry_dt.strftime("%Y-%m-%d %H:%M:%S %Z"), inline=False)
+                embed.add_field(name="Generator", value=f"{generator.mention}", inline=False)
+                embed.add_field(name="Penerima", value=f"{recipient.mention}", inline=False)
+                embed.add_field(name="Berlaku Hingga", value=expiry_dt.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
                 await log_channel.send(embed=embed)
             else:
                  log.warning(f"Channel log pembelian (ID: {PURCHASE_LOG_CHANNEL_ID}) tidak ditemukan atau bukan text channel.")
@@ -107,7 +106,7 @@ class LicenseCog(commands.Cog):
 
         # Kirim notifikasi (Embed) ke penerima
         embed = discord.Embed(title="🎟️ Lisensi Dibuat", color=discord.Color.green())
-        embed.add_field(name="🔑 Kode", value=f"`{license_key}`", inline=False)
+        embed.add_field(name="🔑 License", value=f"|`{license_key}`|", inline=False)
         expiry_display = expiry_datetime.strftime("%Y-%m-%d")
         embed.add_field(name="📅 Berlaku hingga", value=expiry_display, inline=False)
         embed.set_footer(text=f"Diberikan oleh {ctx.author.display_name}")
