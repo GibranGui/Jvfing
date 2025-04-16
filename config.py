@@ -40,7 +40,7 @@ ADMIN_ROLE_ID = get_env_var_int("ADMIN_ROLE_ID")         # Ganti dengan ID peran
 SALES_ROLE_ID = get_env_var_int("SALES_ROLE_ID")         # Ganti dengan ID peran Sales Man
 SCRIPT_CHANNEL_ID = get_env_var_int("SCRIPT_CHANNEL_ID") # Channel file .lua
 PURCHASE_LOG_CHANNEL_ID = get_env_var_int("PURCHASE_LOG_CHANNEL_ID") # Channel log pembelian baru
-
+PURCHASED_LICENSE_ROLE_ID = get_env_var_int("PURCHASED_LICENSE_ROLE_ID") # Ganti dengan ID peran yang diberikan setelah pembelian
 # --- Konfigurasi Lain ---
 UTC_PLUS_7 = timezone(timedelta(hours=7))
 LICENSE_DURATION_DAYS = 30 # Durasi lisensi dalam hari
