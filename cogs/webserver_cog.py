@@ -8,7 +8,7 @@ from datetime import datetime
 
 # Impor dari file lain
 from config import SCRIPT_CHANNEL_ID, UTC_PLUS_7, WEB_SERVER_PORT
-from database import fetch_license
+from database import fetch_script_by_license
 
 log = logging.getLogger(__name__)
 
@@ -101,12 +101,11 @@ class WebserverCog(commands.Cog):
         # 1. Parse Request Body
         try:
             data = await request.json()
-            user_id = str(data.get("user_id"))
             license_key_from_request = data.get("license_key")
             script_request = data.get("script_request") # Nama file script yang diminta
 
-            if not user_id or not license_key_from_request:
-                log.warning(f"API Req Warning: user_id/license_key kosong. IP: {remote_ip}")
+            if not license_key_from_request or not script_request:
+                log.warning(f"API Req Warning: license_key atau script_request kosong. IP: {remote_ip}")
                 return web.Response(text="INVALID", status=400)
         except json.JSONDecodeError:
             log.warning(f"API Req Warning: Payload JSON tidak valid. IP: {remote_ip}")
@@ -115,46 +114,23 @@ class WebserverCog(commands.Cog):
             log.error(f"API Req Error: Gagal parse request body: {e}. IP: {remote_ip}")
             return web.Response(text="INVALID", status=500)
 
-        # 2. Validasi Lisensi via Database
-        license_data = await fetch_license(db_pool, user_id)
+        # 2. Validasi Lisensi via Database (menggunakan license_key)
+        allowed_script = await fetch_script_by_license(db_pool, license_key_from_request)
 
-        if license_data is None:
-            log.info(f"API Req Info: Lisensi tidak ditemukan untuk user {user_id}. IP: {remote_ip}")
-            return web.Response(text="INVALID", status=403)
-
-        db_key = license_data.get('key')
-        db_expiry = license_data.get('expiry') # Objek datetime aware
-        allowed_script = license_data.get('script_name') # Ambil nama script yang diizinkan dari DB
-
-        if license_key_from_request != db_key:
-            log.info(f"API Req Info: Kunci lisensi salah untuk user {user_id}. IP: {remote_ip}")
-            return web.Response(text="INVALID", status=403)
-
-        if db_expiry is None or db_expiry < datetime.now(UTC_PLUS_7):
-            log.info(f"API Req Info: Lisensi tidak valid/kedaluwarsa untuk user {user_id}. IP: {remote_ip}")
+        if allowed_script is None:
+            log.info(f"API Req Info: Lisensi '{license_key_from_request}' tidak valid. IP: {remote_ip}")
             return web.Response(text="INVALID", status=403)
 
         # 3. Ambil URL Script berdasarkan permintaan dan izin
-        if script_request:
-            if allowed_script and allowed_script.lower() == script_request.lower():
-                script_url = await self.fetch_script_url(bot_instance, script_request)
-                if script_url:
-                    return web.Response(text=script_url)
-                else:
-                    return web.Response(text="SCRIPT_NOT_FOUND", status=404)
+        if allowed_script.lower() == script_request.lower():
+            script_url = await self.fetch_script_url(bot_instance, script_request)
+            if script_url:
+                return web.Response(text=script_url)
             else:
-                log.info(f"API Req Info: Script '{script_request}' tidak diizinkan untuk user {user_id} (diizinkan: '{allowed_script}'). IP: {remote_ip}")
-                return web.Response(text="UNAUTHORIZED_SCRIPT", status=403)
+                return web.Response(text="SCRIPT_NOT_FOUND", status=404)
         else:
-            # Jika tidak ada script yang diminta, kembalikan script yang diizinkan (jika ada)
-            if allowed_script:
-                script_url = await self.fetch_script_url(bot_instance, allowed_script)
-                if script_url:
-                    return web.Response(text=script_url)
-                else:
-                    return web.Response(text="DEFAULT_SCRIPT_NOT_FOUND", status=404)
-            else:
-                return web.Response(text="NO_SCRIPT_SPECIFIED", status=400)
+            log.info(f"API Req Info: Lisensi '{license_key_from_request}' tidak valid untuk script '{script_request}'. Diizinkan: '{allowed_script}'. IP: {remote_ip}")
+            return web.Response(text="UNAUTHORIZED_SCRIPT", status=403)
 
     # --- Lifecycle Methods ---
     async def cog_load(self):
