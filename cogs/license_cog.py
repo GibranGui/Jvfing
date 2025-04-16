@@ -31,13 +31,12 @@ class LicenseCog(commands.Cog):
 
             if log_channel and isinstance(log_channel, discord.TextChannel):
                 embed = discord.Embed(
-                    title="✅ Log Pembuatan Lisensi",
+                    title="✅ Log Pembelian Lisensi",
                     color=discord.Color.blue(),
                     timestamp=datetime.now(UTC_PLUS_7)
                 )
-                embed.add_field(name="Generator", value=f"{generator.mention} ({generator.id})", inline=False)
-                embed.add_field(name="Penerima", value=f"{recipient.mention} ({recipient.id})", inline=False)
-                embed.add_field(name="Kunci Lisensi", value=f"`{key}`", inline=False)
+                embed.add_field(name="Generator", value=f"{generator.mention}", inline=False)
+                embed.add_field(name="Penerima", value=f"{recipient.mention}", inline=False)
                 embed.add_field(name="Berlaku Hingga", value=expiry_dt.strftime("%Y-%m-%d %H:%M:%S %Z"), inline=False)
                 if script_name:
                     embed.add_field(name="Script Dilisensikan", value=f"`{script_name}`", inline=False)
