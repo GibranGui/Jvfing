@@ -42,40 +42,47 @@ async def close_db_pool(pool: asyncpg.Pool):
         except Exception as e:
             log.error(f"Error saat menutup database pool: {e}")
 
-# --- Operasi Tabel Licenses ---
+# --- Operasi Tabel Licenses (TANPA user_id) ---
 
-async def add_or_update_license(pool: asyncpg.Pool, user_id: str, key: str, expiry: datetime, used_on: datetime, script_name: Optional[str] = None) -> bool:
-    """Menyimpan atau memperbarui lisensi di database."""
+async def create_licenses_table(pool):
+    async with pool.acquire() as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS licenses (
+                key VARCHAR(255) PRIMARY KEY,
+                script_name VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        ''')
+        log.info("Tabel 'licenses' berhasil dibuat atau sudah ada.")
+
+async def add_license(pool: asyncpg.Pool, key: str, script_name: str) -> bool:
+    """Menyimpan lisensi ke database."""
     sql = """
-    INSERT INTO licenses (user_id, key, expiry, used_on, script_name)
-    VALUES ($1, $2, $3, $4, $5)
-    ON CONFLICT (user_id) DO UPDATE SET
-        key = EXCLUDED.key,
-        expiry = EXCLUDED.expiry,
-        used_on = EXCLUDED.used_on,
-        script_name = EXCLUDED.script_name;
+    INSERT INTO licenses (key, script_name)
+    VALUES ($1, $2)
+    ON CONFLICT (key) DO NOTHING; -- Jika key sudah ada, abaikan
     """
     try:
         async with pool.acquire() as connection:
-            await connection.execute(sql, user_id, key, expiry, used_on, script_name)
-        log.info(f"Lisensi untuk {user_id} disimpan/diupdate ke database.")
+            await connection.execute(sql, key, script_name)
+        log.info(f"Lisensi '{key}' untuk '{script_name}' disimpan ke database.")
         return True
     except Exception as e:
-        log.error(f"Gagal menyimpan/update lisensi ke database untuk {user_id}: {e}")
+        log.error(f"Gagal menyimpan lisensi '{key}' ke database: {e}")
         return False
 
-async def fetch_license(pool: asyncpg.Pool, user_id: str) -> Optional[Dict[str, Any]]:
-    """Mengambil data lisensi dari database berdasarkan user_id."""
-    sql = "SELECT key, expiry, used_on, script_name FROM licenses WHERE user_id = $1;"
+async def fetch_script_by_license(pool: asyncpg.Pool, key: str) -> Optional[str]:
+    """Mengambil nama script dari database berdasarkan key lisensi."""
+    sql = "SELECT script_name FROM licenses WHERE key = $1;"
     try:
         async with pool.acquire() as connection:
-            result = await connection.fetchrow(sql, user_id)
-            return dict(result) if result else None
+            result = await connection.fetchrow(sql, key)
+            return result['script_name'] if result else None
     except Exception as e:
-        log.error(f"Gagal mengambil lisensi dari database untuk {user_id}: {e}")
+        log.error(f"Gagal mengambil script berdasarkan key '{key}' dari database: {e}")
         return None
 
-# --- Operasi Tabel Sales Limits ---
+# --- Operasi Tabel Sales Limits (TIDAK BERUBAH) ---
 
 async def get_sales_limit_db(pool: asyncpg.Pool, sales_user_id: str) -> Optional[int]:
     """Mendapatkan limit sales dari database."""
@@ -83,16 +90,13 @@ async def get_sales_limit_db(pool: asyncpg.Pool, sales_user_id: str) -> Optional
     try:
         async with pool.acquire() as connection:
             result = await connection.fetchval(sql, sales_user_id)
-            # fetchval mengembalikan None jika tidak ada baris atau kolom null
-            return result if result is not None else 0 # Default 0 jika user tidak ditemukan
+            return result if result is not None else 0
     except Exception as e:
         log.error(f"Gagal mengambil limit sales dari database untuk {sales_user_id}: {e}")
-        return None # Indikasi error
+        return None
 
 async def decrement_sales_limit_db(pool: asyncpg.Pool, sales_user_id: str) -> bool:
     """Mengurangi limit sales di database secara aman."""
-    # Menggunakan UPDATE ... RETURNING untuk memastikan limit > 0 sebelum dikurangi
-    # dan mendapatkan nilai baru, atau tahu jika tidak ada baris yg terupdate.
     sql = """
     UPDATE sales_limits
     SET current_limit = current_limit - 1
@@ -101,26 +105,17 @@ async def decrement_sales_limit_db(pool: asyncpg.Pool, sales_user_id: str) -> bo
     """
     try:
         async with pool.acquire() as connection:
-            # fetchval akan mengembalikan limit baru jika update berhasil, None jika tidak
             new_limit = await connection.fetchval(sql, sales_user_id)
-            if new_limit is not None:
-                log.info(f"Limit sales untuk {sales_user_id} dikurangi menjadi {new_limit}.")
-                return True # Pengurangan berhasil
-            else:
-                # Ini terjadi jika limit awal sudah 0 atau user tidak ditemukan
-                log.warning(f"Gagal mengurangi limit sales untuk {sales_user_id} (limit 0 atau user tidak ada).")
-                return False # Pengurangan gagal (limit 0 atau user tdk ada)
+            return True if new_limit is not None else False
     except Exception as e:
         log.error(f"Gagal mengurangi limit sales di database untuk {sales_user_id}: {e}")
-        return False # Error database
+        return False
 
 async def set_sales_limit_db(pool: asyncpg.Pool, sales_user_id: str, new_limit: int) -> bool:
     """Menetapkan limit sales baru (untuk command admin)."""
     if new_limit < 0:
         log.error("Limit baru tidak boleh negatif.")
         return False
-
-    # Gunakan UPSERT untuk insert jika belum ada, atau update jika sudah ada
     sql = """
     INSERT INTO sales_limits (sales_user_id, current_limit)
     VALUES ($1, $2)
