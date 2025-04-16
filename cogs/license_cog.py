@@ -37,7 +37,6 @@ class LicenseCog(commands.Cog):
                 )
                 embed.add_field(name="Generator", value=f"{generator.mention}", inline=False)
                 embed.add_field(name="Penerima", value=f"{recipient.mention}", inline=False)
-                embed.add_field(name="Kunci Lisensi", value=f"`{key}`", inline=False)
                 embed.add_field(name="Script Dilisensikan", value=f"`{script_name}`", inline=False)
                 await log_channel.send(embed=embed)
             else:
