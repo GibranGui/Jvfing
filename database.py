@@ -44,19 +44,20 @@ async def close_db_pool(pool: asyncpg.Pool):
 
 # --- Operasi Tabel Licenses ---
 
-async def add_or_update_license(pool: asyncpg.Pool, user_id: str, key: str, expiry: datetime, used_on: datetime) -> bool:
+async def add_or_update_license(pool: asyncpg.Pool, user_id: str, key: str, expiry: datetime, used_on: datetime, script_name: Optional[str] = None) -> bool:
     """Menyimpan atau memperbarui lisensi di database."""
     sql = """
-    INSERT INTO licenses (user_id, key, expiry, used_on)
-    VALUES ($1, $2, $3, $4)
+    INSERT INTO licenses (user_id, key, expiry, used_on, script_name)
+    VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT (user_id) DO UPDATE SET
-      key = EXCLUDED.key,
-      expiry = EXCLUDED.expiry,
-      used_on = EXCLUDED.used_on;
+        key = EXCLUDED.key,
+        expiry = EXCLUDED.expiry,
+        used_on = EXCLUDED.used_on,
+        script_name = EXCLUDED.script_name;
     """
     try:
         async with pool.acquire() as connection:
-            await connection.execute(sql, user_id, key, expiry, used_on)
+            await connection.execute(sql, user_id, key, expiry, used_on, script_name)
         log.info(f"Lisensi untuk {user_id} disimpan/diupdate ke database.")
         return True
     except Exception as e:
@@ -65,7 +66,7 @@ async def add_or_update_license(pool: asyncpg.Pool, user_id: str, key: str, expi
 
 async def fetch_license(pool: asyncpg.Pool, user_id: str) -> Optional[Dict[str, Any]]:
     """Mengambil data lisensi dari database berdasarkan user_id."""
-    sql = "SELECT key, expiry, used_on FROM licenses WHERE user_id = $1;"
+    sql = "SELECT key, expiry, used_on, script_name FROM licenses WHERE user_id = $1;"
     try:
         async with pool.acquire() as connection:
             result = await connection.fetchrow(sql, user_id)
@@ -116,15 +117,15 @@ async def decrement_sales_limit_db(pool: asyncpg.Pool, sales_user_id: str) -> bo
 async def set_sales_limit_db(pool: asyncpg.Pool, sales_user_id: str, new_limit: int) -> bool:
     """Menetapkan limit sales baru (untuk command admin)."""
     if new_limit < 0:
-         log.error("Limit baru tidak boleh negatif.")
-         return False
+        log.error("Limit baru tidak boleh negatif.")
+        return False
 
     # Gunakan UPSERT untuk insert jika belum ada, atau update jika sudah ada
     sql = """
     INSERT INTO sales_limits (sales_user_id, current_limit)
     VALUES ($1, $2)
     ON CONFLICT (sales_user_id) DO UPDATE SET
-      current_limit = EXCLUDED.current_limit;
+        current_limit = EXCLUDED.current_limit;
     """
     try:
         async with pool.acquire() as connection:
