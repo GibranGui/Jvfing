@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import logging
 
 # Impor dari file lain dalam proyek
-from config import ADMIN_ROLE_ID, SALES_ROLE_ID, PURCHASE_LOG_CHANNEL_ID, UTC_PLUS_7, LICENSE_DURATION_DAYS
+from config import ADMIN_ROLE_ID, SALES_ROLE_ID, PURCHASE_LOG_CHANNEL_ID, UTC_PLUS_7, LICENSE_DURATION_DAYS, PURCHASED_LICENSE_ROLE_ID
 from database import (
     add_or_update_license,
     get_sales_limit_db,
@@ -19,25 +19,28 @@ log = logging.getLogger(__name__)
 class LicenseCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.db_pool = bot.db_pool  # Akses db_pool dari atribut bot
+        self.db_pool = bot.db_pool
         log.info("License Cog loaded.")
 
-    async def log_purchase(self, generator: discord.Member, recipient: discord.Member, expiry_dt: datetime, key: str):
+    async def log_purchase(self, generator: discord.Member, recipient: discord.Member, expiry_dt: datetime, key: str, script_name: str = None):
         """Mengirim log ke channel purchase-log."""
         try:
-            log_channel = self.bot.get_channel(PURCHASE_LOG_CHANNEL_ID) # get_channel lebih efisien jika channel di cache
+            log_channel = self.bot.get_channel(PURCHASE_LOG_CHANNEL_ID)
             if not log_channel:
-                log_channel = await self.bot.fetch_channel(PURCHASE_LOG_CHANNEL_ID) # Fallback fetch
+                log_channel = await self.bot.fetch_channel(PURCHASE_LOG_CHANNEL_ID)
 
             if log_channel and isinstance(log_channel, discord.TextChannel):
                 embed = discord.Embed(
-                    title="✅ Log Pembelian Lisensi",
+                    title="✅ Log Pembuatan Lisensi",
                     color=discord.Color.blue(),
                     timestamp=datetime.now(UTC_PLUS_7)
                 )
-                embed.add_field(name="Generator", value=f"{generator.mention}", inline=False)
-                embed.add_field(name="Penerima", value=f"{recipient.mention}", inline=False)
-                embed.add_field(name="Berlaku Hingga", value=expiry_dt.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+                embed.add_field(name="Generator", value=f"{generator.mention} ({generator.id})", inline=False)
+                embed.add_field(name="Penerima", value=f"{recipient.mention} ({recipient.id})", inline=False)
+                embed.add_field(name="Kunci Lisensi", value=f"`{key}`", inline=False)
+                embed.add_field(name="Berlaku Hingga", value=expiry_dt.strftime("%Y-%m-%d %H:%M:%S %Z"), inline=False)
+                if script_name:
+                    embed.add_field(name="Script Dilisensikan", value=f"`{script_name}`", inline=False)
                 await log_channel.send(embed=embed)
             else:
                  log.warning(f"Channel log pembelian (ID: {PURCHASE_LOG_CHANNEL_ID}) tidak ditemukan atau bukan text channel.")
@@ -49,10 +52,9 @@ class LicenseCog(commands.Cog):
         except Exception as e:
             log.error(f"Gagal mengirim log pembelian: {e}")
 
-    @commands.command(name='generate_license', help='Generate lisensi untuk member (!generate_license @member)')
-    # Menggunakan ID Role untuk pemeriksaan izin
+    @commands.command(name='generate_license', help='Generate lisensi untuk member (!generate_license @member [nama_script])')
     @commands.has_any_role(ADMIN_ROLE_ID, SALES_ROLE_ID)
-    async def generate_license(self, ctx: commands.Context, member: discord.Member):
+    async def generate_license(self, ctx: commands.Context, member: discord.Member, script_name: str = None):
         """Generate lisensi untuk member dan simpan ke Supabase."""
         author_roles_ids = [role.id for role in ctx.author.roles]
         is_admin = ADMIN_ROLE_ID in author_roles_ids
@@ -63,52 +65,42 @@ class LicenseCog(commands.Cog):
             await ctx.send("❌ Kesalahan: Koneksi database tidak tersedia. Hubungi pengembang.", delete_after=10)
             return
 
-        # Cek batasan untuk Admin Sales (sudah menggunakan DB)
         if is_sales and not is_admin:
             sales_user_id_str = str(ctx.author.id)
             limit = await get_sales_limit_db(self.db_pool, sales_user_id_str)
 
-            if limit is None: # Indikasi error saat get limit
+            if limit is None:
                 await ctx.send("⚠️ Tidak bisa memeriksa limit Sales Anda saat ini. Hubungi Admin.", delete_after=10)
                 return
             if limit <= 0:
                 await ctx.send("❌ Anda sudah mencapai batas lisensi yang dapat dibuat!", delete_after=5)
                 return
 
-            # Coba kurangi limit DULUAN (lebih aman, jika insert gagal, limit tidak terkurangi)
-            # Tapi jika insert GAGAL setelah decrement, limit tetap terkurangi.
-            # Idealnya pakai transaksi DB, tapi untuk simpelnya kita coba decrement:
             decrement_success = await decrement_sales_limit_db(self.db_pool, sales_user_id_str)
             if not decrement_success:
-                 # Ini bisa terjadi jika limit 0 (dicek lagi di DB) atau ada error DB
                  await ctx.send("❌ Gagal mengurangi limit Anda (kemungkinan limit sudah 0 atau error DB).", delete_after=10)
                  return
             log.info(f"Sales limit untuk {ctx.author} ({sales_user_id_str}) berhasil dikurangi.")
 
-
-        # Generate data lisensi
         license_key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
         now_wib = datetime.now(UTC_PLUS_7)
         expiry_datetime = now_wib + timedelta(days=LICENSE_DURATION_DAYS)
         user_id_str = str(member.id)
 
-        # Simpan ke database
-        save_success = await add_or_update_license(self.db_pool, user_id_str, license_key, expiry_datetime, now_wib)
+        save_success = await add_or_update_license(self.db_pool, user_id_str, license_key, expiry_datetime, now_wib, script_name=script_name)
 
         if not save_success:
             await ctx.send("⚠️ Terjadi kesalahan saat menyimpan lisensi ke database.", delete_after=10)
-            # TODO: Jika penyimpanan gagal, idealnya kembalikan limit sales yang sudah dikurangi.
-            # Memerlukan fungsi `increment_sales_limit_db` atau mekanisme transaksi.
             return
 
-        # Kirim Log Pembelian
-        await self.log_purchase(ctx.author, member, expiry_datetime, license_key)
+        await self.log_purchase(ctx.author, member, expiry_datetime, license_key, script_name)
 
-        # Kirim notifikasi (Embed) ke penerima
         embed = discord.Embed(title="🎟️ Lisensi Dibuat", color=discord.Color.green())
-        embed.add_field(name="🔑 License", value=f"|`{license_key}`|", inline=False)
+        embed.add_field(name="🔑 Kode", value=f"`{license_key}`", inline=False)
         expiry_display = expiry_datetime.strftime("%Y-%m-%d")
         embed.add_field(name="📅 Berlaku hingga", value=expiry_display, inline=False)
+        if script_name:
+            embed.add_field(name="📜 Script Dilisensikan", value=f"`{script_name}`", inline=False)
         embed.set_footer(text=f"Diberikan oleh {ctx.author.display_name}")
 
         try:
@@ -122,51 +114,10 @@ class LicenseCog(commands.Cog):
             log.error(f"Gagal mengirim DM lisensi ke {member.id}: {e}")
             await ctx.send(f"⚠️ Gagal mengirim DM ke {member.mention}.", delete_after=15)
 
-        # Konfirmasi di channel dan hapus pesan perintah
-        await ctx.message.delete(delay=3)
-        confirm_msg = f"✅ Lisensi untuk {member.mention} berhasil dibuat/diperbarui!"
-        if not dm_success:
-             confirm_msg += " (Gagal kirim DM)"
-        await ctx.send(confirm_msg, delete_after=10)
-
-
-    @generate_license.error
-    async def generate_license_error(self, ctx: commands.Context, error):
-        """Error handler untuk generate_license."""
-        original_error = getattr(error, 'original', error)
-        log.warning(f"Error pada perintah !generate_license oleh {ctx.author}: {error} (Original: {original_error})")
-
-        if isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"❌ Penggunaan salah. Contoh: `{ctx.prefix}generate_license @NamaMember`", delete_after=10)
-        elif isinstance(error, commands.MemberNotFound):
-            await ctx.send(f"❌ Member Discord `{error.argument}` tidak ditemukan.", delete_after=10)
-        elif isinstance(error, commands.MissingAnyRole):
-            await ctx.send("❌ Anda tidak memiliki izin untuk menggunakan perintah ini.", delete_after=5)
-        else:
-            # Tangani error spesifik jika perlu
-            # isinstance(original_error, asyncpg.PostgresError) etc.
-            await ctx.send("❌ Terjadi error internal saat memproses perintah.", delete_after=10)
-
-        # Coba hapus pesan perintah jika masih ada
-        try:
-            await ctx.message.delete(delay=3)
-        except discord.HTTPException:
-            pass # Abaikan jika pesan sudah terhapus atau tidak bisa dihapus
-
-    # --- TODO: Tambahkan command untuk Admin mengatur limit sales ---
-    # @commands.command(name='set_limit')
-    # @commands.has_role(ADMIN_ROLE_ID)
-    # async def set_limit(self, ctx: commands.Context, sales_member: discord.Member, limit: int):
-    #     # ... Panggil set_sales_limit_db ...
-    #     pass
-
-    # @commands.command(name='check_limit')
-    # @commands.has_any_role(ADMIN_ROLE_ID, SALES_ROLE_ID)
-    # async def check_limit(self, ctx: commands.Context, member: discord.Member = None):
-    #      # ... Panggil get_sales_limit_db ...
-    #      # Jika member None, cek limit diri sendiri (ctx.author)
-    #      pass
-
-# Fungsi setup untuk Cog
-async def setup(bot: commands.Bot):
-    await bot.add_cog(LicenseCog(bot))
+        purchased_role_id = PURCHASED_LICENSE_ROLE_ID
+        if purchased_role_id:
+            role = ctx.guild.get_role(purchased_role_id)
+            if role:
+                try:
+                    await member.add_roles(role, reason="Pembelian Lisensi")
+                    log.info(f"Peran '{role.name}' berhasil diatribusikan kepada {member.display_name} ({member.id}) pasca aku
