@@ -43,7 +43,7 @@ class LicenseCog(commands.Cog):
                     embed.add_field(name="Script Dilisensikan", value=f"`{script_name}`", inline=False)
                 await log_channel.send(embed=embed)
             else:
-                 log.warning(f"Channel log pembelian (ID: {PURCHASE_LOG_CHANNEL_ID}) tidak ditemukan atau bukan text channel.")
+                log.warning(f"Channel log pembelian (ID: {PURCHASE_LOG_CHANNEL_ID}) tidak ditemukan atau bukan text channel.")
 
         except discord.NotFound:
             log.error(f"Channel log pembelian (ID: {PURCHASE_LOG_CHANNEL_ID}) tidak ditemukan.")
@@ -78,8 +78,8 @@ class LicenseCog(commands.Cog):
 
             decrement_success = await decrement_sales_limit_db(self.db_pool, sales_user_id_str)
             if not decrement_success:
-                 await ctx.send("❌ Gagal mengurangi limit Anda (kemungkinan limit sudah 0 atau error DB).", delete_after=10)
-                 return
+                await ctx.send("❌ Gagal mengurangi limit Anda (kemungkinan limit sudah 0 atau error DB).", delete_after=10)
+                return
             log.info(f"Sales limit untuk {ctx.author} ({sales_user_id_str}) berhasil dikurangi.")
 
         license_key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
@@ -120,4 +120,57 @@ class LicenseCog(commands.Cog):
             if role:
                 try:
                     await member.add_roles(role, reason="Pembelian Lisensi")
-                    log.info(f"Peran '{role.name}' berhasil diatribusikan kepada {member.display_name} ({member.id}) pasca aku
+                    log.info(f"Peran '{role.name}' berhasil diatribusikan kepada {member.display_name} ({member.id}) pasca pembelian lisensi.")
+                except discord.Forbidden:
+                    log.warning(f"Gagal memberikan peran '{role.name}' kepada {member.display_name} ({member.id}). Bot tidak memiliki izin `manage_roles`.")
+                except Exception as e:
+                    log.error(f"Terjadi kesalahan saat memberikan peran '{role.name}' kepada {member.display_name} ({member.id}): {e}")
+
+        # Konfirmasi di channel dan hapus pesan perintah
+        await ctx.message.delete(delay=3)
+        confirm_msg = f"✅ Lisensi untuk {member.mention} berhasil dibuat/diperbarui!"
+        if not dm_success:
+            confirm_msg += " (Gagal kirim DM)"
+        await ctx.send(confirm_msg, delete_after=10)
+
+
+    @generate_license.error
+    async def generate_license_error(self, ctx: commands.Context, error):
+        """Error handler untuk generate_license."""
+        original_error = getattr(error, 'original', error)
+        log.warning(f"Error pada perintah !generate_license oleh {ctx.author}: {error} (Original: {original_error})")
+
+        if isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send(f"❌ Penggunaan salah. Contoh: `{ctx.prefix}generate_license @NamaMember [nama_script]`", delete_after=10)
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send(f"❌ Member Discord `{error.argument}` tidak ditemukan.", delete_after=10)
+        elif isinstance(error, commands.MissingAnyRole):
+            await ctx.send("❌ Anda tidak memiliki izin untuk menggunakan perintah ini.", delete_after=5)
+        else:
+            # Tangani error spesifik jika perlu
+            # isinstance(original_error, asyncpg.PostgresError) etc.
+            await ctx.send("❌ Terjadi error internal saat memproses perintah.", delete_after=10)
+
+        # Coba hapus pesan perintah jika masih ada
+        try:
+            await ctx.message.delete(delay=3)
+        except discord.HTTPException:
+            pass # Abaikan jika pesan sudah terhapus atau tidak bisa dihapus
+
+    # --- TODO: Tambahkan command untuk Admin mengatur limit sales ---
+    # @commands.command(name='set_limit')
+    # @commands.has_role(ADMIN_ROLE_ID)
+    # async def set_limit(self, ctx: commands.Context, sales_member: discord.Member, limit: int):
+    #     # ... Panggil set_sales_limit_db ...
+    #     pass
+
+    # @commands.command(name='check_limit')
+    # @commands.has_any_role(ADMIN_ROLE_ID, SALES_ROLE_ID)
+    # async def check_limit(self, ctx: commands.Context, member: discord.Member = None):
+    #      # ... Panggil get_sales_limit_db ...
+    #      # Jika member None, cek limit diri sendiri (ctx.author)
+    #      pass
+
+# Fungsi setup untuk Cog
+async def setup(bot: commands.Bot):
+    await bot.add_cog(LicenseCog(bot))
